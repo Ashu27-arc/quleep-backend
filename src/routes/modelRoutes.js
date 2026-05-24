@@ -6,6 +6,7 @@ const {
   getModelById,
   saveState,
   getState,
+  getSignedModelUrl,
 } = require('../controllers/modelController');
 const auth = require('../middleware/auth');
 const upload = require('../middleware/upload');
@@ -21,5 +22,8 @@ router.get('/:id', getModelById);
 // Model camera interaction state persistence
 router.post('/:id/state', saveState);
 router.get('/:id/state', getState);
+
+// Generate a short-lived pre-signed URL for private S3 asset access
+router.get('/:id/signed-url', getSignedModelUrl);
 
 module.exports = router;

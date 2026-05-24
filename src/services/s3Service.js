@@ -1,4 +1,5 @@
-const { PutObjectCommand } = require('@aws-sdk/client-s3');
+const { PutObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
+const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const fs = require('fs');
 const path = require('path');
 const s3Config = require('../config/s3');
@@ -44,6 +45,38 @@ const uploadFile = async (file, folder = 'models') => {
   return `/uploads/${folder}/${sanitizedName}`;
 };
 
+/**
+ * Generates a short-lived pre-signed URL so the browser can GET a private S3 object.
+ * Falls back gracefully if S3 is not configured (returns the raw path unchanged).
+ * @param {string} s3Url  Full S3 HTTPS URL stored in the database
+ * @param {number} expiresIn  Seconds until the signed URL expires (default 3600 = 1 h)
+ * @returns {Promise<string>} Pre-signed URL (or original URL if not an S3 object)
+ */
+const generateSignedUrl = async (s3Url, expiresIn = 3600) => {
+  if (!s3Config.isConfigured || !s3Url || !s3Url.startsWith('https://')) {
+    return s3Url;
+  }
+
+  try {
+    // Extract the S3 key from the full URL
+    // URL format: https://<bucket>.s3.<region>.amazonaws.com/<key>
+    const urlObj = new URL(s3Url);
+    const key = urlObj.pathname.replace(/^\//, ''); // strip leading slash
+
+    const command = new GetObjectCommand({
+      Bucket: s3Config.bucketName,
+      Key: key,
+    });
+
+    const signedUrl = await getSignedUrl(s3Config.s3Client, command, { expiresIn });
+    return signedUrl;
+  } catch (err) {
+    console.error('Failed to generate pre-signed URL:', err.message);
+    return s3Url; // fallback to original URL
+  }
+};
+
 module.exports = {
   uploadFile,
+  generateSignedUrl,
 };

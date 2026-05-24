@@ -1,6 +1,6 @@
 const Model3D = require('../models/Model3D');
 const InteractionState = require('../models/InteractionState');
-const { uploadFile } = require('../services/s3Service');
+const { uploadFile, generateSignedUrl } = require('../services/s3Service');
 const path = require('path');
 
 // @desc    Upload new 3D model (.glb)
@@ -127,5 +127,23 @@ exports.getState = async (req, res) => {
   } catch (err) {
     console.error('Retrieve camera state error:', err.message);
     res.status(500).json({ message: 'Server error retrieving interaction state.' });
+  }
+};
+
+// @desc    Get a short-lived pre-signed URL for downloading/viewing a private S3 asset
+// @route   GET /api/models/:id/signed-url
+// @access  Private
+exports.getSignedModelUrl = async (req, res) => {
+  try {
+    const model = await Model3D.findOne({ _id: req.params.id, userId: req.user.id });
+    if (!model) {
+      return res.status(404).json({ message: 'Model not found or access denied.' });
+    }
+
+    const signedUrl = await generateSignedUrl(model.modelUrl);
+    res.json({ signedUrl });
+  } catch (err) {
+    console.error('Signed URL generation error:', err.message);
+    res.status(500).json({ message: 'Server error generating signed URL.' });
   }
 };
