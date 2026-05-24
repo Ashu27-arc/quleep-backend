@@ -24,7 +24,7 @@ app.use(
 
 app.use(
   cors({
-    origin: process.env.CLIENT_ORIGIN || 'http://localhost:5173',
+    origin: process.env.CLIENT_ORIGIN || 'https://quleep-frontend-two.vercel.app',
     credentials: true,
   })
 );
