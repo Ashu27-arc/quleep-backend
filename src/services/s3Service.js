@@ -21,7 +21,7 @@ const uploadFile = async (file, folder = 'models') => {
         Bucket: s3Config.bucketName,
         Key: key,
         Body: file.buffer,
-        ContentType: file.mimetype,
+        ContentType: 'model/gltf-binary',
       });
 
       await s3Config.s3Client.send(command);
@@ -52,6 +52,23 @@ const uploadFile = async (file, folder = 'models') => {
  * @param {number} expiresIn  Seconds until the signed URL expires (default 3600 = 1 h)
  * @returns {Promise<string>} Pre-signed URL (or original URL if not an S3 object)
  */
+/** @param {string} s3Url */
+const extractS3Key = (s3Url) => {
+  const urlObj = new URL(s3Url);
+  const host = urlObj.hostname;
+
+  // Path-style: https://s3.<region>.amazonaws.com/<bucket>/<key>
+  if (host.startsWith('s3.') || host === 's3.amazonaws.com') {
+    const parts = urlObj.pathname.replace(/^\//, '').split('/');
+    if (parts[0] === s3Config.bucketName) {
+      return parts.slice(1).join('/');
+    }
+  }
+
+  // Virtual-hosted: https://<bucket>.s3.<region>.amazonaws.com/<key>
+  return urlObj.pathname.replace(/^\//, '');
+};
+
 const generateSignedUrl = async (s3Url, expiresIn = 3600) => {
   if (!s3Config.isConfigured || !s3Url || !s3Url.startsWith('https://')) {
     return s3Url;
@@ -60,8 +77,7 @@ const generateSignedUrl = async (s3Url, expiresIn = 3600) => {
   try {
     // Extract the S3 key from the full URL
     // URL format: https://<bucket>.s3.<region>.amazonaws.com/<key>
-    const urlObj = new URL(s3Url);
-    const key = urlObj.pathname.replace(/^\//, ''); // strip leading slash
+    const key = extractS3Key(s3Url);
 
     const command = new GetObjectCommand({
       Bucket: s3Config.bucketName,
@@ -76,7 +92,61 @@ const generateSignedUrl = async (s3Url, expiresIn = 3600) => {
   }
 };
 
+/**
+ * Streams a model asset (S3 or local) to an Express response.
+ * @param {string} modelUrl URL stored in the database
+ * @param {import('express').Response} res Express response
+ */
+const streamModelAsset = async (modelUrl, res) => {
+  return new Promise((resolve, reject) => {
+    res.setHeader('Content-Type', 'model/gltf-binary');
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+
+    const finish = (stream) => {
+      stream.on('error', (err) => {
+        if (!res.headersSent) {
+          res.status(404).json({ message: 'Model file not found in storage.' });
+        }
+        reject(err);
+      });
+      stream.on('end', resolve);
+      stream.pipe(res);
+    };
+
+    (async () => {
+      if (modelUrl.startsWith('https://') && s3Config.isConfigured) {
+        const key = extractS3Key(modelUrl);
+        const command = new GetObjectCommand({
+          Bucket: s3Config.bucketName,
+          Key: key,
+        });
+        const s3Response = await s3Config.s3Client.send(command);
+        if (!s3Response.Body) {
+          throw new Error('Empty response from S3');
+        }
+        return finish(s3Response.Body);
+      }
+
+      const localPath = path.join(__dirname, '../../public', modelUrl);
+      if (!fs.existsSync(localPath)) {
+        if (!res.headersSent) {
+          res.status(404).json({ message: 'Model file not found on server.' });
+        }
+        return reject(new Error('Model file not found on server'));
+      }
+      return finish(fs.createReadStream(localPath));
+    })().catch((err) => {
+      console.error('streamModelAsset error:', err.message);
+      if (!res.headersSent) {
+        res.status(404).json({ message: 'Model file not found in storage.' });
+      }
+      reject(err);
+    });
+  });
+};
+
 module.exports = {
   uploadFile,
   generateSignedUrl,
+  streamModelAsset,
 };

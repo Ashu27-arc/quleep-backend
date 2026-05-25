@@ -1,6 +1,6 @@
 const Model3D = require('../models/Model3D');
 const InteractionState = require('../models/InteractionState');
-const { uploadFile, generateSignedUrl } = require('../services/s3Service');
+const { uploadFile, generateSignedUrl, streamModelAsset } = require('../services/s3Service');
 const path = require('path');
 
 // @desc    Upload new 3D model (.glb)
@@ -56,10 +56,18 @@ exports.getModelById = async (req, res) => {
     if (!model) {
       return res.status(404).json({ message: 'Model not found or access denied.' });
     }
+
+    // ?asset=glb streams binary on the existing route (works before /stream is deployed)
+    if (req.query.asset === 'glb') {
+      return streamModelAsset(model.modelUrl, res);
+    }
+
     res.json(model);
   } catch (err) {
     console.error('Fetch model detail error:', err.message);
-    res.status(500).json({ message: 'Server error retrieving model details.' });
+    if (!res.headersSent) {
+      res.status(500).json({ message: 'Server error retrieving model details.' });
+    }
   }
 };
 
@@ -127,6 +135,25 @@ exports.getState = async (req, res) => {
   } catch (err) {
     console.error('Retrieve camera state error:', err.message);
     res.status(500).json({ message: 'Server error retrieving interaction state.' });
+  }
+};
+
+// @desc    Stream GLB binary through the API (avoids S3 CORS / auth issues in the browser)
+// @route   GET /api/models/:id/stream
+// @access  Private
+exports.streamModel = async (req, res) => {
+  try {
+    const model = await Model3D.findOne({ _id: req.params.id, userId: req.user.id });
+    if (!model) {
+      return res.status(404).json({ message: 'Model not found or access denied.' });
+    }
+
+    await streamModelAsset(model.modelUrl, res);
+  } catch (err) {
+    console.error('Model stream error:', err.message);
+    if (!res.headersSent) {
+      res.status(500).json({ message: 'Server error streaming model asset.' });
+    }
   }
 };
 
